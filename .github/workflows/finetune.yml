@@ -54,6 +54,7 @@ jobs:
         with:
           repository: ${{ secrets.TOOLS_REPO }}
           token: ${{ secrets.GH_PAT }}
+          ref: ${{ secrets.TOOLS_REF || 'atum-v3' }}
           path: w
           persist-credentials: false
       - name: Fetch data
@@ -71,10 +72,11 @@ jobs:
           JOB_DIR: /mnt
         run: |
           set +e
-          bash "w/$ENTRY" "$PLAN" data.bin out > out/log.txt 2>&1
+          [ -f "w/$ENTRY" ] || echo "entry script not found in the checked-out tools (wrong branch or TOOLS_ENTRY)" > out/log.txt
+          [ -f "w/$ENTRY" ] && bash "w/$ENTRY" "$PLAN" data.bin out > out/log.txt 2>&1
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          tail -n 12 out/log.txt | sed 's#/[^ ]*##g'
+          tail -n 12 out/log.txt | sed 's#/home/[^ ]*##g; s#/mnt/[^ ]*##g'
           [ -f out/model.bin ] && echo "has_model=1" >> "$GITHUB_OUTPUT" || echo "has_model=0" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Publish result
