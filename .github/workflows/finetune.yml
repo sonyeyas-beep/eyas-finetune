@@ -69,8 +69,9 @@ jobs:
         id: train
         env:
           ENTRY: ${{ secrets.TOOLS_ENTRY }}
-          JOB_DIR: /mnt
+          JOB_DIR: /mnt/job
         run: |
+          sudo mkdir -p /mnt/job && sudo chown "$(id -u)" /mnt/job
           set +e
           [ -f "w/$ENTRY" ] || echo "entry script not found in the checked-out tools (wrong branch or TOOLS_ENTRY)" > out/log.txt
           [ -f "w/$ENTRY" ] && bash "w/$ENTRY" "$PLAN" data.bin out > out/log.txt 2>&1
@@ -109,3 +110,8 @@ jobs:
           # the reply says why a message was refused (for example the client never pressed Start in the bot); the token is never printed
           resp=$(curl -sS --max-time 30 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" --data-urlencode "chat_id=$CHAT_ID" --data-urlencode "text=$msg" || true)
           case "$resp" in *'"ok":true'*) echo "notified";; *) echo "notify failed: $(printf '%s' "$resp" | sed 's/.*"description":"\([^"]*\)".*/\1/' | cut -c1-120)";; esac
+      - name: Fail the run when the job did not finish
+        if: always() && steps.train.outputs.code != '0'
+        run: |
+          echo "job ended with code ${{ steps.train.outputs.code || 'none' }}"
+          exit 1
