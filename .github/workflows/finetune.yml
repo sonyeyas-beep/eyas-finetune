@@ -1,0 +1,107 @@
+name: finetune
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        description: plan
+        type: choice
+        required: true
+        options: [basic_7B, standard_13B, premium_70B]
+      data_url:
+        description: short-lived download URL of the data file
+        required: true
+      order_id:
+        description: order id
+        required: true
+      telegram_chat_id:
+        description: chat id
+        required: true
+      dry_run:
+        description: "1 = measure only (no model file) until the trainer is wired"
+        required: false
+        default: "1"
+
+permissions:
+  contents: write   # only to publish the result as a release asset
+
+concurrency:
+  group: finetune-${{ inputs.order_id }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PLAN: ${{ inputs.plan }}
+      ORDER_ID: ${{ inputs.order_id }}
+      CHAT_ID: ${{ inputs.telegram_chat_id }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Validate inputs
+        env:
+          DATA_URL: ${{ inputs.data_url }}
+        run: |
+          echo "::add-mask::$DATA_URL"
+          [[ "$ORDER_ID" =~ ^[A-Za-z0-9_-]{6,40}$ ]] || { echo "bad order id"; exit 1; }
+          [[ "$CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo "bad chat id"; exit 1; }
+          [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B)$ ]] || { echo "bad plan"; exit 1; }
+          [[ "$DRY_RUN" =~ ^[01]$ ]] || { echo "bad flag"; exit 1; }
+          [[ "$DATA_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "data url must be https"; exit 1; }
+      - name: Fetch private tools
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          token: ${{ secrets.GH_PAT }}
+          path: w
+          persist-credentials: false
+      - name: Fetch data
+        env:
+          DATA_URL: ${{ inputs.data_url }}
+        run: |
+          echo "::add-mask::$DATA_URL"
+          mkdir -p out
+          curl -fsSL --max-time 600 --max-filesize 1073741824 -o data.bin "$DATA_URL" 2>/dev/null || { echo "data download failed"; exit 1; }
+          echo "data bytes: $(stat -c %s data.bin)"
+      - name: Run
+        id: train
+        env:
+          ENTRY: ${{ secrets.TOOLS_ENTRY }}
+          JOB_DIR: /mnt
+        run: |
+          set +e
+          bash "w/$ENTRY" "$PLAN" data.bin out > out/log.txt 2>&1
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          tail -n 12 out/log.txt | sed 's#/[^ ]*##g'
+          [ -f out/model.bin ] && echo "has_model=1" >> "$GITHUB_OUTPUT" || echo "has_model=0" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Publish result
+        id: publish
+        if: steps.train.outputs.has_model == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="m-$ORDER_ID-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          gh release create "$tag" out/model.bin --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "result"
+          echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/model.bin" >> "$GITHUB_OUTPUT"
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ inputs.order_id }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Tell the client
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CODE: ${{ steps.train.outputs.code }}
+          URL: ${{ steps.publish.outputs.url }}
+        run: |
+          if [ -n "$URL" ]; then msg="Order $ORDER_ID is ready: $URL"
+          elif [ "$CODE" = "4" ]; then msg="Order $ORDER_ID: this plan does not fit the free runner. Support will contact you."
+          else msg="Order $ORDER_ID could not be completed (code ${CODE:-?}). Support will contact you."; fi
+          curl -fsS --max-time 30 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" --data-urlencode "chat_id=$CHAT_ID" --data-urlencode "text=$msg" > /dev/null || echo "notify failed"
