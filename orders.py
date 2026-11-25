@@ -17,7 +17,7 @@ _NEXT = {
     "training": {"done", "failed"},
 }
 MAX_DATA_BYTES = 20 << 20  # the bot API's own download limit for files
-ORDER_ID = re.compile(r"^[A-Za-z0-9_-]{6,40}$")
+ORDER_ID = re.compile(r"^[A-Za-z0-9_-]{3,40}$")
 
 
 class OrderError(Exception):

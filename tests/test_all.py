@@ -84,6 +84,19 @@ class Public(unittest.TestCase):
                 t = p.read_text(errors="ignore")
                 self.assertIsNone(DENY.search(p.name + t), f"{p}: {DENY.search(p.name + t)}")
 
+    def test_the_order_id_rule_accepts_test_ids_and_bot_ids_and_nothing_with_shell_characters(self):
+        w = (ROOT / ".github/workflows/finetune.yml").read_text()
+        m = re.search(r'ORDER_ID" =~ (\^\[A-Za-z0-9_-\]\{\d+,\d+\}\$)', w)
+        self.assertTrue(m, "order id rule missing")
+        rx = re.compile(m.group(1))
+        from orders import ORDER_ID
+        for good in ("test1", "o1a2b3c4d5e6f", "abc"):
+            self.assertTrue(rx.match(good) and ORDER_ID.match(good), good)
+        for bad in ("ab", "a b", "a;rm", "$(x)", "a" * 41, "x\n"):
+            self.assertFalse(rx.match(bad), repr(bad))
+        o = Orders(Path(__import__("tempfile").mkdtemp()) / "o.json")
+        self.assertTrue(ORDER_ID.match(o.create(1, "basic_7B", "card")))
+
     def test_workflow_is_safe(self):
         w = (ROOT / ".github/workflows/finetune.yml").read_text()
         for must in ("workflow_dispatch", "plan", "data_url", "order_id", "telegram_chat_id", "secrets.GH_PAT", "persist-credentials: false", "add-mask"):
@@ -106,6 +119,7 @@ class Public(unittest.TestCase):
             self.assertIn(c, b)
         from orders import PLANS
         self.assertEqual({k: v[1] for k, v in PLANS.items()}, {"basic_7B": 100, "standard_13B": 200, "premium_70B": 400})
+        self.assertNotIn('"ref": "main"', b)  # the default branch is called Main
         compile(b, "bot.py", "exec")
 
 

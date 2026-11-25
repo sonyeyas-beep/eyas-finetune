@@ -135,7 +135,7 @@ async def dispatch(order_id: str, plan: str, data_url: str, chat: int):
         r = await c.post(
             f"https://api.github.com/repos/{repo}/actions/workflows/finetune.yml/dispatches",
             headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"},
-            json={"ref": "main", "inputs": {"plan": plan, "data_url": data_url, "order_id": order_id, "telegram_chat_id": str(chat), "dry_run": os.environ.get("DRY_RUN", "1")}},
+            json={"ref": os.environ.get("PIPELINE_REF", "Main"), "inputs": {"plan": plan, "data_url": data_url, "order_id": order_id, "telegram_chat_id": str(chat), "dry_run": os.environ.get("DRY_RUN", "1")}},
         )
         r.raise_for_status()
 

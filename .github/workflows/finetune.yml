@@ -44,7 +44,7 @@ jobs:
           DATA_URL: ${{ inputs.data_url }}
         run: |
           echo "::add-mask::$DATA_URL"
-          [[ "$ORDER_ID" =~ ^[A-Za-z0-9_-]{6,40}$ ]] || { echo "bad order id"; exit 1; }
+          [[ "$ORDER_ID" =~ ^[A-Za-z0-9_-]{3,40}$ ]] || { echo "bad order id"; exit 1; }
           [[ "$CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo "bad chat id"; exit 1; }
           [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B)$ ]] || { echo "bad plan"; exit 1; }
           [[ "$DRY_RUN" =~ ^[01]$ ]] || { echo "bad flag"; exit 1; }
@@ -104,4 +104,6 @@ jobs:
           if [ -n "$URL" ]; then msg="Order $ORDER_ID is ready: $URL"
           elif [ "$CODE" = "4" ]; then msg="Order $ORDER_ID: this plan does not fit the free runner. Support will contact you."
           else msg="Order $ORDER_ID could not be completed (code ${CODE:-?}). Support will contact you."; fi
-          curl -fsS --max-time 30 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" --data-urlencode "chat_id=$CHAT_ID" --data-urlencode "text=$msg" > /dev/null || echo "notify failed"
+          # the reply says why a message was refused (for example the client never pressed Start in the bot); the token is never printed
+          resp=$(curl -sS --max-time 30 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" --data-urlencode "chat_id=$CHAT_ID" --data-urlencode "text=$msg" || true)
+          case "$resp" in *'"ok":true'*) echo "notified";; *) echo "notify failed: $(printf '%s' "$resp" | sed 's/.*"description":"\([^"]*\)".*/\1/' | cut -c1-120)";; esac
