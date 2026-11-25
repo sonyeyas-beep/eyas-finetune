@@ -104,8 +104,9 @@ class Orders:
         self._move(oid, "done" if ok else "failed")
 
 
+PLACEHOLDER = "Payment link will be sent after you confirm"
+
+
 def payment_target(method, env=os.environ):
-    v = env.get(METHODS[method], "")
-    if not v:
-        raise OrderError("payment method not configured")
-    return v
+    """The configured link or wallet, or "" when it is not set yet (the order is still taken; the operator sends the link)."""
+    return env.get(METHODS[method], "")

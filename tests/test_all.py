@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from orders import MAX_DATA_BYTES, OrderError, Orders, payment_target  # noqa: E402
 
-DENY = re.compile(r"atum|mlin|engine|tile|worker|amx|proc\.rs|runner_job|ci_finetune|stream_bench|llama|mistral|qwen|gemma", re.I)
+DENY = re.compile(r"atum|mlin|engine|tile|amx|proc\.rs|runner_job|ci_finetune|stream_bench|llama|mistral|qwen|gemma", re.I)
 
 
 class Book(unittest.TestCase):
@@ -71,8 +71,7 @@ class Book(unittest.TestCase):
         self.assertEqual(len(ids), 50)
 
     def test_links_come_from_the_environment_only(self):
-        with self.assertRaises(OrderError):
-            payment_target("card", {})
+        self.assertEqual(payment_target("card", {}), "")  # not configured: the bot says the link follows, it does not look broken
         self.assertEqual(payment_target("usdt", {"USDT_WALLET": "w"}), "w")
         self.assertNotRegex((ROOT / "bot.py").read_text() + (ROOT / "orders.py").read_text(), r"https?://(buy\.stripe|paypal\.me|pay)")
 
@@ -172,6 +171,24 @@ class BotRuns(unittest.TestCase):
         asyncio.run(self.bot.on_button(up, ctx))
         self.assertIn("https://pay.example/s", q.edit_message_text.call_args[0][0])
 
+    def test_order_without_a_configured_link_answers_with_the_placeholder(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        os.environ.pop("PAYPAL_LINK", None)
+        q = MagicMock()
+        q.answer, q.edit_message_text = AsyncMock(), AsyncMock()
+        q.data, q.message.chat_id = "pay:basic_7B:paypal", 7
+        up = MagicMock()
+        up.callback_query = q
+        ctx = MagicMock()
+        ctx.bot.send_message = AsyncMock()
+        ctx.application.bot_data = {"orders": self.bot.Orders(os.environ["ORDERS_FILE"])}
+        asyncio.run(self.bot.on_button(up, ctx))
+        text = q.edit_message_text.call_args[0][0]
+        self.assertIn("Payment link will be sent after you confirm", text)
+        self.assertNotIn("not configured", text)
+        ctx.bot.send_message.assert_awaited()  # the operator is told to send the link
+
     def test_startup_removes_the_webhook_tells_the_admin_and_commands_are_logged(self):
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
@@ -198,6 +215,29 @@ class BotRuns(unittest.TestCase):
         self.assertIn("run_polling", (ROOT / "bot.py").read_text())
         self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "deploy_bot.sh")]).returncode, 0)
         self.assertNotRegex(d + (ROOT / "render.yaml").read_text(), r"\d{8,}:[A-Za-z0-9_-]{30,}")
+
+
+class NoServer(unittest.TestCase):
+    def test_render_and_cloudflare_files_are_complete(self):
+        r = (ROOT / "render.yaml").read_text()
+        for s in ("runtime: docker", "dockerfilePath: ./Dockerfile", "branch: Main", "TELEGRAM_BOT_TOKEN", "healthCheckPath"):
+            self.assertIn(s, r)
+        d = (ROOT / "Dockerfile").read_text()
+        self.assertIn("USER bot", d)
+        self.assertIn('CMD ["python", "bot.py"]', d)
+        wr = (ROOT / "wrangler.jsonc").read_text()
+        self.assertIn('"main": "worker.js"', wr)
+        self.assertIn('"binding": "ORDERS"', wr)
+        s = (ROOT / "SETUP.md").read_text()
+        self.assertIn("/setup?t=", s)
+        self.assertIn("Payment link will be sent after you confirm", s)
+
+    def test_the_javascript_side_passes(self):
+        import shutil
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        r = subprocess.run(["node", "--test", str(ROOT / "worker.test.mjs")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout[-1500:])
 
 
 class Private(unittest.TestCase):

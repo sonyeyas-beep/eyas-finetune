@@ -3,6 +3,9 @@ services:
   - type: web
     name: order-bot
     runtime: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    branch: Main
     plan: free
     healthCheckPath: /
     envVars:
@@ -16,6 +19,8 @@ services:
         sync: false
       - key: USDT_WALLET
         sync: false
+      - key: PIPELINE_REF
+        value: Main
       - key: PIPELINE_REPO
         value: sonyeyas-beep/eyas-finetune
       - key: PIPELINE_TOKEN

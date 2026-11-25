@@ -9,7 +9,7 @@ import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from orders import MAX_DATA_BYTES, METHODS, PLANS, OrderError, Orders, payment_target
+from orders import MAX_DATA_BYTES, METHODS, PLACEHOLDER, PLANS, OrderError, Orders, payment_target
 
 log = logging.getLogger("bot")
 ADMIN = int(os.environ.get("ADMIN_CHAT_ID", "0"))
@@ -51,7 +51,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(f"Sorry: {e}")
             return
         name, price = PLANS[rest[0]]
-        await q.edit_message_text(f"Order {oid}: {name} ${price}\nPay here ({PAY_NAMES[rest[1]]}): {target}\nThen send /pay {oid} and your payment screenshot or transaction ID.")
+        pay_line = f"Pay here ({PAY_NAMES[rest[1]]}): {target}" if target else PLACEHOLDER
+        if not target and ADMIN:
+            await ctx.bot.send_message(ADMIN, f"Order {oid} ({name} ${price}, {PAY_NAMES[rest[1]]}) has no payment link configured: send it to chat {q.message.chat_id}.")
+        await q.edit_message_text(f"Order {oid}: {name} ${price}\n{pay_line}\nThen send /pay {oid} and your payment screenshot or transaction ID.")
 
 
 async def pay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
