@@ -123,6 +123,83 @@ class Public(unittest.TestCase):
         compile(b, "bot.py", "exec")
 
 
+class BotRuns(unittest.TestCase):
+    """The handlers answer, the startup drops any webhook and tells the admin, and the token comes from the secret's name."""
+
+    def setUp(self):
+        os.environ["TELEGRAM_BOT_TOKEN"] = "123456:TEST"
+        os.environ["ORDERS_FILE"] = str(Path(__import__("tempfile").mkdtemp()) / "o.json")
+        os.environ["ADMIN_CHAT_ID"] = "42"
+        os.environ["STRIPE_LINK"] = "https://pay.example/s"
+        import importlib
+        import bot
+        self.bot = importlib.reload(bot)
+
+    def _upd(self, text="/start"):
+        from unittest.mock import AsyncMock, MagicMock
+        u = MagicMock()
+        u.message.reply_text = AsyncMock()
+        u.effective_message.text = text
+        u.effective_chat.id = 7
+        return u
+
+    def test_start_replies_with_the_plans_and_the_payment_question(self):
+        import asyncio
+        u = self._upd()
+        asyncio.run(self.bot.start(u, None))
+        text = u.message.reply_text.call_args[0][0]
+        for s in ("$100", "$200", "$400", "How do you want to pay?", "1. Card", "2. PayPal", "3. USDT"):
+            self.assertIn(s, text)
+
+    def test_order_asks_for_the_plan_then_the_payment_method_then_sends_the_link_from_env(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        u = self._upd("/order")
+        asyncio.run(self.bot.order(u, None))
+        self.assertEqual(u.message.reply_text.call_args[0][0], "Which plan?")
+        kb = u.message.reply_text.call_args[1]["reply_markup"]
+        self.assertEqual([b.callback_data for r in kb.inline_keyboard for b in r], ["plan:basic_7B", "plan:standard_13B", "plan:premium_70B"])
+        q = MagicMock()
+        q.answer, q.edit_message_text = AsyncMock(), AsyncMock()
+        q.data, q.message.chat_id = "plan:basic_7B", 7
+        up = MagicMock()
+        up.callback_query = q
+        ctx = MagicMock()
+        ctx.application.bot_data = {"orders": self.bot.Orders(os.environ["ORDERS_FILE"])}
+        asyncio.run(self.bot.on_button(up, ctx))
+        self.assertEqual(q.edit_message_text.call_args[0][0], "How do you want to pay?")
+        q.data = "pay:basic_7B:card"
+        asyncio.run(self.bot.on_button(up, ctx))
+        self.assertIn("https://pay.example/s", q.edit_message_text.call_args[0][0])
+
+    def test_startup_removes_the_webhook_tells_the_admin_and_commands_are_logged(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        app = MagicMock()
+        app.bot.delete_webhook, app.bot.send_message = AsyncMock(), AsyncMock()
+        app.bot.get_me = AsyncMock(return_value=MagicMock(username="b"))
+        asyncio.run(self.bot.on_start(app))
+        app.bot.delete_webhook.assert_awaited_once()
+        app.bot.send_message.assert_awaited_once_with(42, "Bot is online")
+        with self.assertLogs("bot", "INFO") as cm:
+            asyncio.run(self.bot.log_command(self._upd("/order extra"), None))
+        self.assertIn("incoming /order from chat 7", cm.output[0])
+        self.assertEqual(self.bot.token(), "123456:TEST")
+        built = self.bot.build()
+        self.assertGreaterEqual(len(built.handlers[0]) + len(built.handlers.get(-1, [])), 8)
+
+    def test_deployment_files_exist_and_run_the_bot_with_polling_and_restart(self):
+        for f in ("Dockerfile", "docker-compose.yml", "Procfile", "render.yaml", "deploy_bot.sh"):
+            self.assertTrue((ROOT / f).exists(), f)
+        self.assertIn("restart: always", (ROOT / "docker-compose.yml").read_text())
+        d = (ROOT / "deploy_bot.sh").read_text()
+        for s in ("Restart=always", "systemctl enable --now", "TELEGRAM_BOT_TOKEN"):
+            self.assertIn(s, d)
+        self.assertIn("run_polling", (ROOT / "bot.py").read_text())
+        self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "deploy_bot.sh")]).returncode, 0)
+        self.assertNotRegex(d + (ROOT / "render.yaml").read_text(), r"\d{8,}:[A-Za-z0-9_-]{30,}")
+
+
 class Private(unittest.TestCase):
     def test_entry_script_refuses_what_the_free_runner_cannot_hold_and_never_fakes_a_model(self):
         s = ROOT.parent.parent / "scripts/ci_finetune.sh"

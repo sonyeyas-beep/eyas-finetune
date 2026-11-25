@@ -164,9 +164,56 @@ async def on_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Data received. Order {oid} is running; you will get the link here when it is done.")
 
 
+def token() -> str:
+    t = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
+    if not t:
+        raise SystemExit("TELEGRAM_BOT_TOKEN is not set")
+    return t
+
+
+async def log_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    if m and m.text and m.text.startswith("/"):
+        log.info("incoming %s from chat %s", m.text.split()[0].split("@")[0], update.effective_chat.id)
+
+
+async def on_start(app: Application):
+    """Polling and a webhook cannot coexist: drop any webhook first, then tell the operator the bot is up."""
+    await app.bot.delete_webhook(drop_pending_updates=False)
+    me = await app.bot.get_me()
+    log.info("bot online as @%s, polling (webhook removed), admin chat %s", me.username, ADMIN or "NOT SET")
+    if ADMIN:
+        try:
+            await app.bot.send_message(ADMIN, "Bot is online")
+        except Exception as e:  # the admin has not pressed Start in this bot yet
+            log.warning("could not tell the admin: %s", type(e).__name__)
+
+
+def health_server():
+    """Platforms that expect a listening port (Render) get a trivial 200 here; polling does not need it."""
+    port = os.environ.get("PORT")
+    if not port:
+        return
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a):
+            pass
+
+    threading.Thread(target=HTTPServer(("0.0.0.0", int(port)), H).serve_forever, daemon=True).start()
+    log.info("health endpoint on port %s", port)
+
+
 def build() -> Application:
-    app = Application.builder().token(os.environ["BOT_TOKEN"]).build()
+    app = Application.builder().token(token()).post_init(on_start).build()
     app.bot_data["orders"] = Orders(os.environ.get("ORDERS_FILE", "orders.json"))
+    app.add_handler(MessageHandler(filters.COMMAND, log_command), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("order", order))
     app.add_handler(CommandHandler("pay", pay))
@@ -179,5 +226,7 @@ def build() -> Application:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    build().run_polling()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its request lines contain the token
+    health_server()
+    build().run_polling(allowed_updates=Update.ALL_TYPES)

@@ -1,0 +1,28 @@
+# Free fallback. Render's free tier only offers web services, which sleep when idle: use it to test, not for orders.
+services:
+  - type: web
+    name: order-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: STRIPE_LINK
+        sync: false
+      - key: PAYPAL_LINK
+        sync: false
+      - key: USDT_WALLET
+        sync: false
+      - key: PIPELINE_REPO
+        value: sonyeyas-beep/eyas-finetune
+      - key: PIPELINE_TOKEN
+        sync: false
+      - key: UPLOAD_PUT_TEMPLATE
+        sync: false
+      - key: UPLOAD_GET_TEMPLATE
+        sync: false
+      - key: DRY_RUN
+        value: "1"
