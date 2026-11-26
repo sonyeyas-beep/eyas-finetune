@@ -17,6 +17,10 @@ on:
       telegram_chat_id:
         description: chat id
         required: true
+      lr:
+        description: learning rate for the proof plan
+        required: false
+        default: "0.0002"
       dry_run:
         description: "1 = measure only (no model file) until the trainer is wired"
         required: false
@@ -38,6 +42,7 @@ jobs:
       ORDER_ID: ${{ inputs.order_id }}
       CHAT_ID: ${{ inputs.telegram_chat_id }}
       DRY_RUN: ${{ inputs.dry_run }}
+      XF_LR: ${{ inputs.lr }}
     steps:
       - name: Validate inputs
         env:
@@ -48,6 +53,7 @@ jobs:
           [[ "$CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo "bad chat id"; exit 1; }
           [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B|proof_0.5B)$ ]] || { echo "bad plan"; exit 1; }
           [[ "$DRY_RUN" =~ ^[01]$ ]] || { echo "bad flag"; exit 1; }
+          [[ "$XF_LR" =~ ^0\.[0-9]{1,6}$ ]] || { echo "bad learning rate"; exit 1; }
           [[ "$DATA_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "data url must be https"; exit 1; }
       - name: Fetch private tools
         uses: actions/checkout@v4
