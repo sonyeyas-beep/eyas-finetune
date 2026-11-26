@@ -7,7 +7,7 @@ on:
         description: plan
         type: choice
         required: true
-        options: [basic_7B, standard_13B, premium_70B]
+        options: [basic_7B, standard_13B, premium_70B, proof_0.5B]
       data_url:
         description: short-lived download URL of the data file
         required: true
@@ -32,7 +32,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 300
     env:
       PLAN: ${{ inputs.plan }}
       ORDER_ID: ${{ inputs.order_id }}
@@ -46,7 +46,7 @@ jobs:
           echo "::add-mask::$DATA_URL"
           [[ "$ORDER_ID" =~ ^[A-Za-z0-9_-]{3,40}$ ]] || { echo "bad order id"; exit 1; }
           [[ "$CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo "bad chat id"; exit 1; }
-          [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B)$ ]] || { echo "bad plan"; exit 1; }
+          [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B|proof_0.5B)$ ]] || { echo "bad plan"; exit 1; }
           [[ "$DRY_RUN" =~ ^[01]$ ]] || { echo "bad flag"; exit 1; }
           [[ "$DATA_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "data url must be https"; exit 1; }
       - name: Fetch private tools
@@ -73,12 +73,13 @@ jobs:
         run: |
           sudo mkdir -p /mnt/job && sudo chown "$(id -u)" /mnt/job
           set +e
-          [ -f "w/$ENTRY" ] || echo "entry script not found in the checked-out tools (wrong branch or TOOLS_ENTRY)" > out/log.txt
-          [ -f "w/$ENTRY" ] && bash "w/$ENTRY" "$PLAN" data.bin out > out/log.txt 2>&1
+          LOG="$RUNNER_TEMP/job.log"   # the build output stays out of the artifacts and the public log
+          [ -f "w/$ENTRY" ] || echo "entry script not found in the checked-out tools (wrong branch or TOOLS_ENTRY)" > "$LOG"
+          [ -f "w/$ENTRY" ] && bash "w/$ENTRY" "$PLAN" data.bin out > "$LOG" 2>&1
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          tail -n 12 out/log.txt | sed 's#/home/[^ ]*##g; s#/mnt/[^ ]*##g'
-          [ -f out/model.bin ] && echo "has_model=1" >> "$GITHUB_OUTPUT" || echo "has_model=0" >> "$GITHUB_OUTPUT"
+          if [ -f out/report.txt ]; then sed 's#/home/[^ ]*##g; s#/mnt/[^ ]*##g' out/report.txt | tail -n 80; else tail -n 12 "$LOG" | sed 's#/home/[^ ]*##g; s#/mnt/[^ ]*##g'; fi
+          [ -f out/adapter_model.safetensors ] && echo "has_model=1" >> "$GITHUB_OUTPUT" || echo "has_model=0" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Publish result
         id: publish
@@ -87,8 +88,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="m-$ORDER_ID-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-          gh release create "$tag" out/model.bin --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "result"
-          echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/model.bin" >> "$GITHUB_OUTPUT"
+          gh release create "$tag" out/adapter_model.safetensors out/adapter_config.json out/loss.csv out/report.txt --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "result"
+          echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/adapter_model.safetensors" >> "$GITHUB_OUTPUT"
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
