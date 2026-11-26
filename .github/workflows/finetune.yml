@@ -21,6 +21,18 @@ on:
         description: learning rate for the proof plan
         required: false
         default: "0.0002"
+      batch:
+        description: batch size for the proof plan
+        required: false
+        default: "4"
+      epochs:
+        description: epochs for the proof plan
+        required: false
+        default: "3"
+      decay:
+        description: "1 = linear learning-rate decay"
+        required: false
+        default: "0"
       dry_run:
         description: "1 = measure only (no model file) until the trainer is wired"
         required: false
@@ -43,6 +55,9 @@ jobs:
       CHAT_ID: ${{ inputs.telegram_chat_id }}
       DRY_RUN: ${{ inputs.dry_run }}
       XF_LR: ${{ inputs.lr }}
+      XF_BATCH: ${{ inputs.batch }}
+      XF_EPOCHS: ${{ inputs.epochs }}
+      XF_DECAY: ${{ inputs.decay }}
     steps:
       - name: Validate inputs
         env:
@@ -53,6 +68,7 @@ jobs:
           [[ "$CHAT_ID" =~ ^-?[0-9]{1,20}$ ]] || { echo "bad chat id"; exit 1; }
           [[ "$PLAN" =~ ^(basic_7B|standard_13B|premium_70B|proof_0.5B)$ ]] || { echo "bad plan"; exit 1; }
           [[ "$DRY_RUN" =~ ^[01]$ ]] || { echo "bad flag"; exit 1; }
+          [[ "$XF_BATCH" =~ ^[0-9]{1,3}$ && "$XF_EPOCHS" =~ ^[0-9]{1,2}$ && "$XF_DECAY" =~ ^[01]$ ]] || { echo "bad batch / epochs / decay"; exit 1; }
           [[ "$XF_LR" =~ ^0\.[0-9]{1,6}$ ]] || { echo "bad learning rate"; exit 1; }
           [[ "$DATA_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "data url must be https"; exit 1; }
       - name: Fetch private tools
